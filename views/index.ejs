@@ -84,6 +84,8 @@
   let inputVideo = document.getElementById("inputVideo");
   let dispCanvas = document.getElementById("dispCanvas");
   let dispCtx;
+  let grayCanvas = document.createElement("canvas");
+  let grayCtx;
   let resizeCanvas = document.createElement("canvas");
   let resizeCtx;
   let outCanvas = document.getElementById("outCanvas");
@@ -91,7 +93,7 @@
   let streaming = false;
 
   const IMG_WIDTH = 64;
-  const MARGIN_RATE = 0.9;
+  const MARGIN_RATE = 0.8;
   let img_scale = 0;
   let v_w;
   let v_h;
@@ -124,12 +126,6 @@
 
   function init(e) {
     inputVideo.play();
-
-    resizeCanvas.width = IMG_WIDTH;
-    resizeCanvas.height = IMG_WIDTH;
-    resizeCtx = resizeCanvas.getContext('2d');
-    outCtx = outCanvas.getContext('2d');
-
     onWindowResize();
   }
 
@@ -159,41 +155,55 @@
       return;
     }
     imgLabel = label;
-   
-    rotateAndSend(0);
-    rotateAndSend(5);
-    rotateAndSend(10);
-    rotateAndSend(-5);
-    rotateAndSend(-10);
+    
+    let rRad = 5;
+    let tPx = 20;
+    let radList = [rRad*-2, rRad*-1, 0, rRad, rRad*2];
+    let pxList = [tPx*-1, 0, tPx]
+
+    grayCtx.drawImage(inputVideo, v_left, v_top, v_w, v_h, 0, 0, grayCanvas.width, grayCanvas.height);
+    let src = cv.imread(grayCanvas);
+    let dst = new cv.Mat();
+    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
+    cv.imshow(grayCanvas, dst);
+    
+    for (px_w_idx in pxList) {
+      for (px_h_idx in pxList) {
+        for (rad_idx in radList) {
+          rotateAndSend(radList[rad_idx], pxList[px_w_idx], pxList[px_h_idx]);
+        }
+      }
+    }
 
     imgLabel = "";
   };
 
   // 画像回転＆送信
-  function rotateAndSend(rad) {
-    // 画像回転
+  function rotateAndSend(rad, px_w, px_h) {
+    // 状態保持
     resizeCtx.save();
     outCtx.save();
+    console.log(`rad: ${rad}, px_w: ${px_w}, px_h: ${px_h}`);
+
+    // 画像回転
     resizeCtx.translate(resizeCanvas.width/2|0, resizeCanvas.height/2|0);
     resizeCtx.rotate((rad * Math.PI)/180);
     resizeCtx.translate(-resizeCanvas.width/2|0, -resizeCanvas.height/2|0);
-    resizeCtx.drawImage(dispCanvas, start_w, start_h, img_scale, img_scale, 0, 0, resizeCanvas.width, resizeCanvas.height);
+    resizeCtx.drawImage(grayCanvas, px_w, px_h, grayCanvas.width + px_w, grayCanvas.height + px_h, 0, 0, resizeCanvas.width, resizeCanvas.height);
 
-    // GrayScale画像生成→画像送信
-    let src = cv.imread(resizeCanvas);
-    let dst = new cv.Mat();
-    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
-    cv.imshow(outCanvas, dst);
+    // 画像生成→画像送信
+    outCtx.drawImage(resizeCanvas, start_w, start_h, img_scale, img_scale, 0, 0, outCanvas.width, outCanvas.height);
     imgsend(outCanvas.toDataURL("image/png"));
 
     // 左右反転画像生成
     resizeCtx.transform(-1, 0, 0, 1, resizeCanvas.width, 0);
-    resizeCtx.drawImage(dispCanvas, start_w, start_h, img_scale, img_scale, 0, 0, resizeCanvas.width, resizeCanvas.height);
-    src = cv.imread(resizeCanvas);
-    dst = new cv.Mat();
-    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
-    cv.imshow(outCanvas, dst);
+    resizeCtx.drawImage(grayCanvas, px_w, px_h, grayCanvas.width + px_w, grayCanvas.height + px_h, 0, 0, resizeCanvas.width, resizeCanvas.height);
+
+    // 画像生成→画像送信
+    outCtx.drawImage(resizeCanvas, start_w, start_h, img_scale, img_scale, 0, 0, outCanvas.width, outCanvas.height);
     imgsend(outCanvas.toDataURL("image/png"));
+
+    // 状態戻し
     resizeCtx.restore();
     outCtx.restore();
  
@@ -221,6 +231,16 @@
     dispCanvas.height = window.innerHeight;
     dispCtx = dispCanvas.getContext('2d');
 
+    grayCanvas.width = dispCanvas.width;
+    grayCanvas.height = dispCanvas.height;
+    grayCtx = grayCanvas.getContext('2d');
+    resizeCanvas.width = dispCanvas.width;
+    resizeCanvas.height = dispCanvas.height;
+    resizeCtx = resizeCanvas.getContext('2d');
+    outCanvas.width = IMG_WIDTH;
+    outCanvas.height = IMG_WIDTH;
+    outCtx = outCanvas.getContext('2d');
+
     img_scale = dispCanvas.width > dispCanvas.height
       ? dispCanvas.height * MARGIN_RATE 
       : dispCanvas.width * MARGIN_RATE;
@@ -242,7 +262,7 @@
         "label": imgLabel
       },
       success: function(data) {
-        console.log(data);
+        // console.log(data);
       }
     });
   }

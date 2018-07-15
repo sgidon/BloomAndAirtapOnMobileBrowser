@@ -105,15 +105,21 @@
   let start_h = 0;
 
   let model;
+  let ismodelload = false;
   let info = document.getElementById('info');
   let outimg = document.getElementById('outImg');
+  const pTimes = 1; // prediction times per sec
+  const BORDER_SCORE = 95; // 以下だとNONEとする。
+
   info.innerHTML = 'model loading...';
   tf.loadModel('./model/model.json').then(modeldata => {
     model = modeldata;
     info.innerHTML = 'model load OK.';
+    ismodelload = true;
   });
 
   guesture_classes = new Array('none', 'bloom ready', 'bloom', 'airtap ready', 'airtap');
+  guesture_colors = new Array('gray', 'darkorange', 'red', 'blueviolet', 'blue');
 
   // ビデオストリームの取得
   navigator.mediaDevices.getUserMedia({video: {facingMode: "environment"}, audio: false})
@@ -131,6 +137,9 @@
           dispCtx.strokeRect(start_w-1, start_h-1, img_scale+2, img_scale+2);
         }
       }, 1000/30);
+    
+    onprediction();
+
     }
   });
 
@@ -145,9 +154,10 @@
     onWindowResize();
   }
 
-  window.addEventListener('click', (e) => {
-    if (!streaming) {
-      return;
+//  window.addEventListener('load', onprediction, false);
+  function onprediction(e) {
+    if (!streaming || !ismodelload) {
+      setTimeout(onprediction, 250);
     }
     resizeCtx.drawImage(dispCanvas, start_w, start_h, img_scale, img_scale, 0, 0, resizeCanvas.width, resizeCanvas.height);
     // GrayScale画像生成→画像送信
@@ -174,9 +184,16 @@
       console.log(maxAccuracy);
 
       let msec = new Date() - time_st;
-      info.innerHTML = `ジェスチャー: ${guesture_classes[maxAccuracy]}, score: ${accuracyScores[maxAccuracy]*100|0}%, ${msec} msec`;
+      let score = accuracyScores[maxAccuracy]*100|0;
+      let guesture = (score > BORDER_SCORE ? guesture_classes[maxAccuracy] : guesture_classes[0]);
+      let bgColor = (score > BORDER_SCORE ? guesture_colors[maxAccuracy] : guesture_colors[0]);
+      info.innerHTML = `${guesture}, SCORE: ${score}%, ${msec} msec`;
+      info.style.backgroundColor = bgColor;
+
+      setTimeout(onprediction, 1000/pTimes - msec);
     })
-  })
+
+  }
 
   function onWindowResize () {
     console.log('setRenderer size', window.innerWidth, window.innerHeight);
@@ -208,6 +225,7 @@
   }
 
   window.addEventListener('resize', onWindowResize, false);
+
 
 </script>
 </html>
