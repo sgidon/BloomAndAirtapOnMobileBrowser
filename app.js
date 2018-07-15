@@ -47,15 +47,14 @@ app.post("/api/upimage", function(req, res, next) {
   });
 });
 
-app.get("/", function (req, res, next) {
+app.get("/scan", function (req, res, next) {
   res.render("index", {});
 });
 
 app.get("/predict.html", function (req, res, next) {
-  console.log('predict');
   res.render("predict", {});
 })
 
-app.get("/forcepush.html", function (req, res, next) {
+app.get("/", function (req, res, next) {
   res.render("forcePush", {});
 })
