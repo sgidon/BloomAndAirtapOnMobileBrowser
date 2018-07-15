@@ -1,0 +1,361 @@
+<html>
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta http-equiv="content-type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no,user-scalable=no,maximum-scale=1">
+    <title>Examples • Force Push</title>
+    <script src="./js/aframe-extras.js"></script>
+    <script src="http://code.jquery.com/jquery-3.3.1.min.js"></script>
+    <script src="./js/opencv.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@0.8.0"></script>
+    <script>
+/**
+ * Rain of Entities component.
+ *
+ * Creates a spawner on the scene, which periodically generates new entities
+ * and drops them from the sky. Objects falling below altitude=0 will be
+ * recycled after a few seconds.
+ *
+ * Requires: physics
+ */
+AFRAME.registerComponent('rain-of-entities', {
+  schema: {
+    tagName:    { default: 'a-box' },
+    components: { default: ['dynamic-body', 'force-pushable', 'color|#39BB82'] },
+    maxCount:   { default: 10, min: 0 },
+    interval:   { default: 1000, min: 0 },
+    lifetime:   { default: 10000, min: 0 }
+  },
+  init: function () {
+    this.boxes = [];
+    this.timeout = setInterval(this.spawn.bind(this), this.data.interval);
+  },
+  spawn: function () {
+    if (this.boxes.length >= this.data.maxCount) {
+      clearTimeout(this.timeout);
+      return;
+    }
+
+    var data = this.data,
+        box = document.createElement(data.tagName);
+
+    this.boxes.push(box);
+    this.el.appendChild(box);
+
+    box.setAttribute('position', this.randomPosition());
+    data.components.forEach(function (s) {
+      var parts = s.split('|');
+      box.setAttribute(parts[0], parts[1] || '');
+    });
+
+    // Recycling is important, kids.
+    setInterval(function () {
+      if (box.body.position.y > 0) return;
+      box.body.position.copy(this.randomPosition());
+      box.body.velocity.set(0,0,0);
+    }.bind(this), this.data.lifetime);
+  },
+  randomPosition: function () {
+    return {x: Math.random() * 10 - 5, y: 10, z: Math.random() * 10 - 5};
+  }
+});
+
+/**
+ * Force Pushable component.
+ *
+ * Applies behavior to the current entity such that cursor clicks will apply a
+ * strong impulse, pushing the entity away from the viewer.
+ *
+ * Requires: physics
+ */
+AFRAME.registerComponent('force-pushable', {
+  schema: {
+    force: { default: 100 }
+  },
+  init: function () {
+    this.pStart = new THREE.Vector3();
+    this.sourceEl = this.el.sceneEl.querySelector('[camera]');
+    this.el.addEventListener('click', this.forcePush.bind(this));
+  },
+  forcePush: function () {
+    var force,
+        el = this.el,
+        pStart = this.pStart.copy(this.sourceEl.getAttribute('position'));
+
+    // Compute direction of force, normalize, then scale.
+    force = el.body.position.vsub(pStart);
+    force.normalize();
+    force.scale(this.data.force, force);
+
+    el.body.applyImpulse(force, el.body.position);
+  }
+});
+
+/**
+ * Force Float component.
+ *
+ * Applies behavior to the scene in which a keypress (default: Spacebar) will
+ * temporarily disable gravity and apply a small upward impulse to target
+ * entities.
+ *
+ * Requires: physics
+ */
+AFRAME.registerComponent('force-float', {
+  schema: {
+    force:    { default: 1.0 },
+    keyCode:  { default: 32 },
+    selector: { default: '[force-float-target]' }
+  },
+
+  init: function () {
+    this.isFloating = false;
+    document.addEventListener('keyup', this.onKeyup.bind(this));
+  },
+
+  onKeyup: function (e) {
+    if (e.keyCode !== this.data.keyCode) return;
+
+    var data = this.data,
+        isFloating = this.isFloating,
+        physics = this.el.sceneEl.systems.physics,
+        targets = this.el.sceneEl.querySelectorAll(data.selector);
+
+    if (isFloating) {
+      physics.setOption('gravity', this.gravity);
+    } else {
+      // Disable gravity.
+      this.gravity = physics.options.gravity;
+      physics.setOption('gravity', 0);
+
+      // Lift targets slightly.
+      targets = [].slice.call(targets).forEach(function (el) {
+        var position = new CANNON.Vec3().copy(el.getAttribute('position')),
+            impulse = new CANNON.Vec3(
+              0.25 * data.force * Math.random(),
+              1.00 * data.force * Math.random() + 1.5,
+              0.25 * data.force * Math.random()
+            );
+        el.body.applyImpulse(impulse, position);
+      });
+    }
+
+    this.isFloating = !isFloating;
+  }
+});
+
+
+    </script>
+    <style>
+      #inputVideo {
+        position: absolute;
+        top:0px;
+        left: 0px;
+        background-size: cover;
+        min-height: 100%;
+        min-width: 100%;
+        min-height: 100vh;
+        min-width: 100vw;
+        visibility: hidden;
+      }
+      #dispCanvas {
+        position: absolute;
+        visibility: hidden;
+      }
+      #outCanvas {
+        position: absolute;
+        visibility: hidden;
+      }
+     .info {
+        position: absolute;
+        height: 25px;
+        width: 100vw;
+        top: 0px;
+        left: 0px;
+        text-align: center;
+        vertical-align: middle;
+        z-index: 999;
+        background-color: gray;
+        color: white;
+      }
+      .outImg {
+        position: absolute;
+        bottom: 2px;
+        left: 2px;
+        width: 100px;
+        height: 100px;
+        z-index: 100;
+      }
+ </style>
+  </head>
+  <body>
+    <a-scene rain-of-entities force-float="selector: [force-pushable];">
+      <!-- Player -->
+      <a-entity camera="userHeight: 1.6"
+                universal-controls="movementEnabled: false"
+                kinematic-body>
+        <a-entity cursor
+                  position="0 0 -1"
+                  geometry="primitive: circle; radius: 0.01; segments: 4;"
+                  material="color: #FF4444; shader: flat"></a-entity>
+      </a-entity>
+
+      <!-- Terrain -->
+      <a-grid static-body></a-grid>
+
+      <!-- Lighting -->
+      <a-light type="ambient" color="#bbb"></a-light>
+      <a-light color="#ccc" position="0 30 0" distance="100" intensity="0.4" type="point"></a-light>
+      <a-light color="#ccc" position="3 10 -10" distance="50" intensity="0.4" type="point"></a-light>
+    </a-scene>
+    
+    <video id="inputVideo" class="inputVideo" ></video>
+    <canvas id="dispCanvas"></canvas>
+    <canvas id="outCanvas"></canvas>
+    <div id="info" class="info">infomation.</div>
+    <img id="outImg" class="outImg">
+  </body>
+
+<script>
+  // getUserMediaについてブラウザ間の挙動の違いを吸収
+  navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || window.navigator.mozGetUserMedia;
+  window.URL = window.URL || window.webkitURL;
+
+  // 各種変数及びDOM
+  let inputVideo = document.getElementById("inputVideo");
+  let dispCanvas = document.getElementById("dispCanvas");
+  let dispCtx;
+  let resizeCanvas = document.createElement("canvas");
+  let resizeCtx;
+  let outCanvas = document.getElementById("outCanvas");
+  let outCtx;
+  let streaming = false;
+
+  const IMG_WIDTH = 64;
+  const MARGIN_RATE = 0.9;
+  let img_scale = 0;
+  let v_w;
+  let v_h;
+  let v_top;
+  let v_left;
+
+  let start_w = 0;
+  let start_h = 0;
+
+  let model;
+  let ismodelload = false;
+  let info = document.getElementById('info');
+  let outimg = document.getElementById('outImg');
+  info.innerHTML = 'model loading...';
+  tf.loadModel('./model/model.json').then(modeldata => {
+    model = modeldata;
+    info.innerHTML = 'model load OK.';
+    ismodelload = true;
+  });
+
+  guesture_classes = new Array('none', 'bloom ready', 'bloom', 'airtap ready', 'airtap');
+
+  // ビデオストリームの取得
+  navigator.mediaDevices.getUserMedia({video: {facingMode: "environment"}, audio: false})
+  .then(function(stream) {
+    streaming = true;
+    inputVideo.src = window.URL.createObjectURL(stream);
+    inputVideo.onloadedmetadata = function(e) {
+      init();
+
+      // 最大30fpsでキャンバスへ描画
+      setInterval(function() {
+        if (streaming) {
+          dispCtx.drawImage(inputVideo, v_left, v_top, v_w, v_h, 0, 0, dispCanvas.width, dispCanvas.height);
+          dispCtx.strokeStyle="#FF0000";
+          dispCtx.strokeRect(start_w-1, start_h-1, img_scale+2, img_scale+2);
+        }
+      }, 1000/30);
+    
+    onprediction();
+
+    }
+  });
+
+  function init(e) {
+    inputVideo.play();
+
+    resizeCanvas.width = IMG_WIDTH;
+    resizeCanvas.height = IMG_WIDTH;
+    resizeCtx = resizeCanvas.getContext('2d');
+    outCtx = outCanvas.getContext('2d');
+
+    onWindowResize();
+  }
+
+//  window.addEventListener('load', onprediction, false);
+  function onprediction(e) {
+    if (!streaming || !ismodelload) {
+      setTimeout(onprediction, 250);
+    }
+    resizeCtx.drawImage(dispCanvas, start_w, start_h, img_scale, img_scale, 0, 0, resizeCanvas.width, resizeCanvas.height);
+    // GrayScale画像生成→画像送信
+    let src = cv.imread(resizeCanvas);
+    let dst = new cv.Mat();
+    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
+    cv.imshow(outCanvas, dst);
+    let imageData = outCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
+    outimg.src = outCanvas.toDataURL('image/png');
+    
+    const score = tf.tidy(() => {
+      let time_st = new Date();
+      // convert to tensor (shape: [width, height, channels])  
+      const channels = 1; // grayscale              
+      let input = tf.fromPixels(imageData, channels);
+      // normalized
+      input = tf.cast(input, 'float32').div(tf.scalar(255));
+      // reshape input format (shape: [batch_size, width, height, channels])
+      input = input.expandDims();
+      // predict
+      const accuracyScores = model.predict(input).dataSync();
+      console.log(accuracyScores);
+      const maxAccuracy = accuracyScores.indexOf(Math.max.apply(null, accuracyScores));
+      console.log(maxAccuracy);
+
+      let msec = new Date() - time_st;
+      info.innerHTML = `ジェスチャー: ${guesture_classes[maxAccuracy]}, score: ${accuracyScores[maxAccuracy]*100|0}%, ${msec} msec`;
+
+      setTimeout(onprediction, 500 - msec);
+    })
+
+  }
+
+  function onWindowResize () {
+    console.log('setRenderer size', window.innerWidth, window.innerHeight);
+    let w_aspect = window.innerWidth / window.innerHeight;
+    let v_aspect = inputVideo.videoWidth / inputVideo.videoHeight;
+    if (w_aspect > v_aspect) {
+      // 画面側の方が、横幅の割合が広い → ビデオの横幅に対して縦幅を調整する。
+      v_w = inputVideo.videoWidth;
+      v_h = v_w / w_aspect | 0;
+      v_top = (inputVideo.videoHeight - v_h) / 2 | 0;
+      v_left = 0;
+    } else {
+      v_h = inputVideo.videoHeight;
+      v_w = v_h * w_aspect | 0;
+      v_top = 0;
+      v_left = (inputVideo.videoWidth - v_w) / 2 | 0;
+    }
+    console.log(`(${v_top}, ${v_left}, ${v_w}, ${v_h})`);
+    
+    dispCanvas.width = window.innerWidth
+    dispCanvas.height = window.innerHeight;
+    dispCtx = dispCanvas.getContext('2d');
+
+    img_scale = dispCanvas.width > dispCanvas.height
+      ? dispCanvas.height * MARGIN_RATE 
+      : dispCanvas.width * MARGIN_RATE;
+    start_w = (dispCanvas.width - img_scale)/2|0;
+    start_h = (dispCanvas.height - img_scale)/2|0;
+  }
+
+  window.addEventListener('resize', onWindowResize, false);
+
+
+</script>
+
+  </html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>撮影＋増殖ツール</title>
+<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+<script src="http://code.jquery.com/jquery-3.3.1.min.js"></script>
+<style>
+  body {
+    font-family: monospace;
+    margin: 0;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100vh;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .wrapper {
+    position: absolute;
+    height: 100%;
+    height: 100vh;
+    width: 100%;
+    width: 100vw;
+    margin: 0 auto;
+  }
+  #dispCanvas {
+    position: absolute;
+    min-height: 80%;
+    min-height: 80vh;
+  }
+  #inputVideo {
+    position: absolute;
+    top:0px;
+    left: 0px;
+    background-size: cover;
+    min-height: 100%;
+    min-width: 100%;
+    min-height: 100vh;
+    min-width: 100vw;
+    visibility: hidden;
+  }
+  .scanPanel {
+    position: absolute;
+    width: 100vw;
+    height: 90vh;
+    z-index: 10;
+  }
+  .scanbutton {
+    position: absolute;
+    width: 200px;
+    height:50px;
+    left: 1%
+  }
+</style>
+</head>
+<body>
+  <div class="wrapper">
+    <video id="inputVideo" class="inputVideo" ></video>
+    <canvas id="dispCanvas"></canvas>
+  </div>
+  <div class="scanPanel">
+  <center>
+    <input class="scanbutton" style="top:10%" type="button" value="アクション なし！" onclick="save('no');"></br>
+    <input class="scanbutton" style="top:20%" type="button" value="ブルーム 　レディ" onclick="save('bloomready')"></br>
+    <input class="scanbutton" style="top:30%" type="button" value="ブルーム 　ゴー！" onclick="save('bloom');"></br>
+    <input class="scanbutton" style="top:40%" type="button" value="エアタップ レディ" onclick="save('airtapready');"></br>
+    <input class="scanbutton" style="top:50%" type="button" value="エアタップ ゴー！" onclick="save('airtap');"></br>
+  </center>
+  </div>
+</body>
+<script>
+  // getUserMediaについてブラウザ間の挙動の違いを吸収
+  navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || window.navigator.mozGetUserMedia;
+  window.URL = window.URL || window.webkitURL;
+  
+  // 各種変数及びDOM
+  let inputVideo = document.getElementById("inputVideo");
+  let dispCanvas = document.getElementById("dispCanvas");
+  let dispCtx;
+  let resizeCanvas = document.createElement("canvas");
+  let resizeCtx;
+  let streaming = false;
+
+  const IMG_WIDTH = 224;
+  const MARGIN_RATE = 0.9;
+  let img_scale = 0;
+  let start_w = 0;
+  let start_h = 0;
+  let rwidth;
+  let rheight;
+  let rstart_w;
+  let rstart_h;
+ 
+  let imgLabel;
+
+  // ビデオストリームの取得
+  navigator.mediaDevices.getUserMedia({video: {facingMode: "environment"}, audio: false})
+  .then(function(stream) {
+    streaming = true;
+    inputVideo.src = window.URL.createObjectURL(stream);
+    inputVideo.onloadedmetadata = function(e) {
+      init();
+
+      // 最大30fpsでキャンバスへ描画
+      setInterval(function() {
+        if (streaming) {
+          // TODO: 表示させる際、画像の範囲を示す赤枠を表示させたい
+          dispCtx.drawImage(inputVideo, 0, 0, inputVideo.videoWidth, inputVideo.videoHeight, 0, 0, dispCanvas.width, dispCanvas.height);
+          dispCtx.strokeStyle="#FF0000";
+          dispCtx.strokeRect(start_w, start_h, img_scale, img_scale);
+        }
+      }, 1000/30);
+    }
+  });
+
+  function init(e) {
+    inputVideo.play();
+    dispCanvas.width = inputVideo.videoWidth;
+    dispCanvas.height = inputVideo.videoHeight;
+    dispCtx = dispCanvas.getContext('2d');
+
+    resizeCanvas.width = IMG_WIDTH;
+    resizeCanvas.height = IMG_WIDTH;
+    resizeCtx = resizeCanvas.getContext('2d');
+
+    img_scale = dispCanvas.width > dispCanvas.height
+      ? dispCanvas.height * MARGIN_RATE 
+      : dispCanvas.width * MARGIN_RATE;
+    start_w = (dispCanvas.width - img_scale)/2|0;
+    start_h = (dispCanvas.height - img_scale)/2|0;
+
+    rwidth = resizeCanvas.width/0.8;
+    rheight = resizeCanvas.height/0.8;
+    rstart_w = -1 * (rwidth - resizeCanvas.width)/2|0;
+    rstart_h = -1 * (rheight - resizeCanvas.height)/2|0;
+   }
+
+  // Utility：日付関数にYYYYMMDDHHMMSSsss形式で文字列を出力する関数Prototypeを追加。
+  Date.prototype.toLocaleString = function()
+  {
+    return [
+      this.getFullYear(),
+      ("0" + (this.getMonth() + 1)).slice(-2),
+      ("0" + this.getDate()).slice(-2)
+      ].join('') 
+      + '' +
+      [
+      ('0' + this.getHours().toString()).slice(-2),
+      ('0' + String(this.getMinutes())).slice(-2),
+      ('0' + this.getSeconds()).slice(-2)
+      ].join('')
+      + '' +
+      ('00' + this.getMilliseconds()).slice(-3)
+      ;
+  }
+
+  // 画面クリック時にキャンバス画像を自サーバへPOSTする（仮
+  // 今後は各挙動ごとにファイル名？などを変更しつつ、増殖させつつPOSTする。
+  function save(label) {
+    if (!streaming) {
+      return;
+    }
+    imgLabel = label;
+   
+    rotateAndSend(0);
+    rotateAndSend(5);
+    rotateAndSend(10);
+    rotateAndSend(-5);
+    rotateAndSend(-10);
+    
+    imgLabel = "";
+  };
+
+  // 画像回転＆送信
+  function rotateAndSend(rad) {
+    resizeCtx.save();
+    resizeCtx.translate(resizeCanvas.width/2|0, resizeCanvas.height/2|0);
+    resizeCtx.rotate((rad * Math.PI)/180);
+    resizeCtx.translate(-resizeCanvas.width/2|0, -resizeCanvas.height/2|0);
+    resizeCtx.drawImage(inputVideo, start_w, start_h, img_scale, img_scale, rstart_w, rstart_h, rwidth, rheight);
+    imgsend(resizeCanvas.toDataURL("image/png"));
+    resizeCtx.transform(-1, 0, 0, 1, resizeCanvas.width, 0);
+    resizeCtx.drawImage(inputVideo, start_w, start_h, img_scale, img_scale, rstart_w, rstart_h, rwidth, rheight);
+    imgsend(resizeCanvas.toDataURL("image/png"));
+    resizeCtx.restore();
+ 
+  }
+
+  // 送信AJAX
+  function imgsend(img) {
+    $.ajax({
+      type: "POST",
+      url: "/api/upimage",
+      data: {
+        "image": img.replace(/^.*,/, ''),
+        "filename": (new Date()).toLocaleString(),
+        "label": imgLabel
+      },
+      success: function(data) {
+        console.log(data);
+      }
+    });
+  }
+
+  // 日付デバッグ用
+  d = new Date('2018', '01', '02', '03', '04', '05', '006');
+  console.log(d.toLocaleString());
+
+</script>
+</html>

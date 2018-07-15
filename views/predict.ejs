@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>撮影＋推論ツール</title>
+<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+<script src="http://code.jquery.com/jquery-3.3.1.min.js"></script>
+<script src="./js/opencv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@0.8.0"></script>
+<style>
+  body {
+    font-family: monospace;
+    margin: 0;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100vh;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .wrapper {
+    position: absolute;
+    height: 100%;
+    height: 100vh;
+    width: 100%;
+    width: 100vw;
+    margin: 0 auto;
+  }
+  #dispCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  #inputVideo {
+    position: absolute;
+    top:0px;
+    left: 0px;
+    background-size: cover;
+    min-height: 100%;
+    min-width: 100%;
+    min-height: 100vh;
+    min-width: 100vw;
+    visibility: hidden;
+  }
+  #outCanvas {
+    position: absolute;
+    visibility: hidden;
+  }
+  .info {
+    position: absolute;
+    height: 25px;
+    width: 100vw;
+    top: 0px;
+    left: 0px;
+    text-align: center;
+    vertical-align: middle;
+    z-index: 999;
+    background-color: gray;
+    color: white;
+  }
+  .outImg {
+    position: absolute;
+    bottom: 2px;
+    left: 2px;
+    width: 100px;
+    height: 100px;
+    z-index: 100;
+  }
+
+ </style>
+</head>
+<body>
+  <canvas id="dispCanvas"></canvas>
+  <div class="wrapper">
+    <video id="inputVideo" class="inputVideo" ></video>
+  </div>
+  <canvas id="outCanvas"></canvas>
+  <div id="info" class="info">infomation.</div>
+  <img id="outImg" class="outImg">
+</body>
+<script>
+  // getUserMediaについてブラウザ間の挙動の違いを吸収
+  navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || window.navigator.mozGetUserMedia;
+  window.URL = window.URL || window.webkitURL;
+
+  // 各種変数及びDOM
+  let inputVideo = document.getElementById("inputVideo");
+  let dispCanvas = document.getElementById("dispCanvas");
+  let dispCtx;
+  let resizeCanvas = document.createElement("canvas");
+  let resizeCtx;
+  let outCanvas = document.getElementById("outCanvas");
+  let outCtx;
+  let streaming = false;
+
+  const IMG_WIDTH = 64;
+  const MARGIN_RATE = 0.9;
+  let img_scale = 0;
+  let v_w;
+  let v_h;
+  let v_top;
+  let v_left;
+
+  let start_w = 0;
+  let start_h = 0;
+
+  let model;
+  let info = document.getElementById('info');
+  let outimg = document.getElementById('outImg');
+  info.innerHTML = 'model loading...';
+  tf.loadModel('./model/model.json').then(modeldata => {
+    model = modeldata;
+    info.innerHTML = 'model load OK.';
+  });
+
+  guesture_classes = new Array('none', 'bloom ready', 'bloom', 'airtap ready', 'airtap');
+
+  // ビデオストリームの取得
+  navigator.mediaDevices.getUserMedia({video: {facingMode: "environment"}, audio: false})
+  .then(function(stream) {
+    streaming = true;
+    inputVideo.src = window.URL.createObjectURL(stream);
+    inputVideo.onloadedmetadata = function(e) {
+      init();
+
+      // 最大30fpsでキャンバスへ描画
+      setInterval(function() {
+        if (streaming) {
+          dispCtx.drawImage(inputVideo, v_left, v_top, v_w, v_h, 0, 0, dispCanvas.width, dispCanvas.height);
+          dispCtx.strokeStyle="#FF0000";
+          dispCtx.strokeRect(start_w-1, start_h-1, img_scale+2, img_scale+2);
+        }
+      }, 1000/30);
+    }
+  });
+
+  function init(e) {
+    inputVideo.play();
+
+    resizeCanvas.width = IMG_WIDTH;
+    resizeCanvas.height = IMG_WIDTH;
+    resizeCtx = resizeCanvas.getContext('2d');
+    outCtx = outCanvas.getContext('2d');
+
+    onWindowResize();
+  }
+
+  window.addEventListener('click', (e) => {
+    if (!streaming) {
+      return;
+    }
+    resizeCtx.drawImage(dispCanvas, start_w, start_h, img_scale, img_scale, 0, 0, resizeCanvas.width, resizeCanvas.height);
+    // GrayScale画像生成→画像送信
+    let src = cv.imread(resizeCanvas);
+    let dst = new cv.Mat();
+    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
+    cv.imshow(outCanvas, dst);
+    let imageData = outCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
+    outimg.src = outCanvas.toDataURL('image/png');
+    
+    const score = tf.tidy(() => {
+      let time_st = new Date();
+      // convert to tensor (shape: [width, height, channels])  
+      const channels = 1; // grayscale              
+      let input = tf.fromPixels(imageData, channels);
+      // normalized
+      input = tf.cast(input, 'float32').div(tf.scalar(255));
+      // reshape input format (shape: [batch_size, width, height, channels])
+      input = input.expandDims();
+      // predict
+      const accuracyScores = model.predict(input).dataSync();
+      console.log(accuracyScores);
+      const maxAccuracy = accuracyScores.indexOf(Math.max.apply(null, accuracyScores));
+      console.log(maxAccuracy);
+
+      let msec = new Date() - time_st;
+      info.innerHTML = `ジェスチャー: ${guesture_classes[maxAccuracy]}, score: ${accuracyScores[maxAccuracy]*100|0}%, ${msec} msec`;
+    })
+  })
+
+  function onWindowResize () {
+    console.log('setRenderer size', window.innerWidth, window.innerHeight);
+    let w_aspect = window.innerWidth / window.innerHeight;
+    let v_aspect = inputVideo.videoWidth / inputVideo.videoHeight;
+    if (w_aspect > v_aspect) {
+      // 画面側の方が、横幅の割合が広い → ビデオの横幅に対して縦幅を調整する。
+      v_w = inputVideo.videoWidth;
+      v_h = v_w / w_aspect | 0;
+      v_top = (inputVideo.videoHeight - v_h) / 2 | 0;
+      v_left = 0;
+    } else {
+      v_h = inputVideo.videoHeight;
+      v_w = v_h * w_aspect | 0;
+      v_top = 0;
+      v_left = (inputVideo.videoWidth - v_w) / 2 | 0;
+    }
+    console.log(`(${v_top}, ${v_left}, ${v_w}, ${v_h})`);
+    
+    dispCanvas.width = window.innerWidth
+    dispCanvas.height = window.innerHeight;
+    dispCtx = dispCanvas.getContext('2d');
+
+    img_scale = dispCanvas.width > dispCanvas.height
+      ? dispCanvas.height * MARGIN_RATE 
+      : dispCanvas.width * MARGIN_RATE;
+    start_w = (dispCanvas.width - img_scale)/2|0;
+    start_h = (dispCanvas.height - img_scale)/2|0;
+  }
+
+  window.addEventListener('resize', onWindowResize, false);
+
+</script>
+</html>
