@@ -47,7 +47,7 @@ app.post("/api/upimage", function(req, res, next) {
   });
 });
 
-app.get("/scan", function (req, res, next) {
+app.get("/scan.html", function (req, res, next) {
   res.render("index", {});
 });
 
